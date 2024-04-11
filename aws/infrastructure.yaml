@@ -1,0 +1,586 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description:  K8s and Vault CSI Provider POC
+Parameters:
+  LatestAmiId:
+    Description: Ubuntu AMI for instance
+    Type: 'AWS::EC2::Image::Id'
+    Default: 'ami-09c8d5d747253fb7a' # Verified provider, Free tier eligible. https://ubuntu.com/cloud
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.16.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: vpc-k8s
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+      - Key: Name
+        Value: igw-k8s
+  InternetGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  RouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: rt-k8s
+  RouteTableDefaultIPv4:
+    Type: 'AWS::EC2::Route'
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId:
+        Ref: InternetGateway
+  RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref Subnet
+      RouteTableId:
+        Ref: RouteTable
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: 10.16.48.0/20
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: subnet-k8s
+  DefaultInstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Enable SSH access via port 22 IPv4 & v6
+      SecurityGroupIngress:
+        # https://ip-ranges.amazonaws.com/ip-ranges.json
+        # Search for {
+        #   "ip_prefix": "13.239.158.0/29",
+        #   "region": "ap-southeast-2",
+        #   "service": "EC2_INSTANCE_CONNECT",
+        #   "network_border_group": "ap-southeast-2"
+        # },
+        - Description: 'Allow SSH IPv4 IN'
+          IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: '13.239.158.0/29'
+  DefaultInstanceSecurityGroupSelfReferenceRule:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Properties:
+      GroupId: !Ref DefaultInstanceSecurityGroup
+      IpProtocol: 'tcp'
+      FromPort: '0'
+      ToPort: '65535'
+      SourceSecurityGroupId: !Ref DefaultInstanceSecurityGroup
+  InstanceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        - "arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess"
+  InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: /
+      Roles:
+        - !Ref InstanceRole
+  S3:
+    Type: AWS::S3::Bucket
+  ControlPlane:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT30M
+    DependsOn: VaultServer
+    Properties:
+      InstanceType: "t2.medium"
+      ImageId: !Ref LatestAmiId
+      PrivateIpAddress: "10.16.54.222"
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Ref Subnet
+      SecurityGroupIds:
+        - !Ref DefaultInstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: controlplane
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+
+          ############### Install cli ###############
+          sudo apt update
+          sudo apt install -y unzip curl
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -q awscliv2.zip
+          sudo ./aws/install
+          aws --version
+          apt  install jq -y
+
+          ############### Install aws cfn-signal ###############
+          sudo apt-get -y update
+          sudo apt-get -y install python3-pip
+          sudo pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+          sudo perl -pi -e "s/collections.MutableMapping/collections.abc.MutableMapping/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/cookies.py
+          sudo perl -pi -e "s/collections.MutableMapping/collections.abc.MutableMapping/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/structures.py
+          sudo perl -pi -e "s/from collections import Mapping/from collections.abc import Mapping/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/sessions.py
+          sudo perl -pi -e "s/collections.Mapping/collections.abc.Mapping/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/utils.py
+          sudo perl -pi -e "s/collections.Callable/collections.abc.Callable/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/models.py
+
+          ############### Install Vault CLI ###############
+          echo "starting..."
+          curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+          sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main" -y
+          sudo apt-get update -y && sudo apt-get install vault -y
+          vault --version
+
+          ############### KUBERNETES COMMON SETUP ###############
+          ###### https://askubuntu.com/questions/1367139/apt-get-upgrade-auto-restart-services
+          ###### https://gist.github.com/fernandoaleman/c3191ed46c977f0a3fcfbdac319183fc
+          sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
+
+          ###### Containerd prerequisite
+          cat <<__EOF | sudo tee /etc/modules-load.d/k8s.conf
+          overlay
+          br_netfilter
+          __EOF
+
+          sudo modprobe overlay
+          sudo modprobe br_netfilter
+
+          # sysctl params required by setup, params persist across reboots
+          cat <<__EOF | sudo tee /etc/sysctl.d/k8s.conf
+          net.bridge.bridge-nf-call-iptables  = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward                 = 1
+          __EOF
+
+          # Apply sysctl params without reboot
+          sudo sysctl --system
+
+          lsmod | grep br_netfilter
+          lsmod | grep overlay
+          sysctl net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward
+
+          ###### Install Containerd
+          # Add Docker's official GPG key:
+          sudo apt-get update
+          sudo apt-get install ca-certificates curl
+          sudo install -m 0755 -d /etc/apt/keyrings
+          sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+          # Add the repository to Apt sources:
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+          sudo apt-get update
+
+          sudo apt install --allow-unauthenticated -qq -y containerd.io apt-transport-https
+          sudo mkdir -p /etc/containerd
+          sudo containerd config default > /etc/containerd/config.toml
+          sudo sed -i 's/SystemdCgroup \= false/SystemdCgroup \= true/g' /etc/containerd/config.toml
+          sudo systemctl restart containerd
+          sudo systemctl enable containerd >/dev/null 2>&1
+          sudo systemctl status containerd.service
+
+          # set download latest crictl
+          CTLVERSION=$(curl -s https://api.github.com/repos/kubernetes-sigs/cri-tools/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+
+          sudo wget -q https://github.com/kubernetes-sigs/cri-tools/releases/download/$CTLVERSION/crictl-$CTLVERSION-linux-amd64.tar.gz
+          sudo tar zxvf crictl-$CTLVERSION-linux-amd64.tar.gz -C /usr/local/bin
+          rm -f crictl-$CTLVERSION-linux-amd64.tar.gz
+
+          sudo crictl config --set runtime-endpoint=unix:///run/containerd/containerd.sock
+          sudo crictl --version
+
+          ###### Install kubelet, kubeadm, kubectl
+          sudo apt-get update
+          # apt-transport-https may be a dummy package; if so, you can skip that package
+          sudo apt-get install -y apt-transport-https ca-certificates curl gpg
+
+          # If the directory `/etc/apt/keyrings` does not exist, it should be created before the curl command, read the note below.
+          # sudo mkdir -p -m 755 /etc/apt/keyrings
+          curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+          # This overwrites any existing configuration in /etc/apt/sources.list.d/kubernetes.list
+          echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+          sudo apt-get update
+          sudo apt-get install -y kubelet kubeadm kubectl
+          sudo apt-mark hold kubelet kubeadm kubectl
+
+          sudo systemctl enable --now kubelet
+
+          ############### Controlplane setup ###############
+          NODE_NAME=controlplane
+          sudo hostnamectl set-hostname $NODE_NAME
+          sudo echo $NODE_NAME > /etc/hostname
+          PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+          kubeadm init --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=$PRIVATE_IP --node-name=$NODE_NAME
+
+          # Install Latest Calico Network Plugin
+          sudo curl -LO  https://docs.projectcalico.org/manifests/calico.yaml
+          sudo kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f calico.yaml
+          echo "Installed Latest Calico Network Plugin"
+
+          # Setup kubeconfig
+          mkdir -p /root/.kube
+          sudo cp -i /etc/kubernetes/admin.conf /root/.kube/config
+          sudo chown $(id -u):$(id -g) /root/.kube/config
+          echo "Copied kube config at master node => /root/.kube/config"
+
+          # Generete kubeadm join token
+          mkdir -p /k8s/configs
+          touch /k8s/configs/join.sh
+          sudo kubeadm token create --print-join-command > /k8s/configs/join.sh
+          echo "Genereted kubeadm join token command"
+
+          aws s3 cp /k8s/configs/join.sh s3://${S3}/join.sh
+          echo "copied /k8s/configs/join.sh to S3 bucket: ${S3}"
+
+          # utilities
+          echo 'alias k="kubectl"' >> /root/.bashrc
+
+          # setup Vault
+          export VAULT_ADDR="http://10.16.61.86:8200"
+          vault operator init \
+            -key-shares=1 \
+            -key-threshold=1 > /root/vault_config.txt
+          
+          UNSEAL_KEY=$(grep "Unseal Key 1:" /root/vault_config.txt | awk '{print $NF}')
+          TOKEN=$(grep "Initial Root Token:" /root/vault_config.txt | awk '{print $NF}')
+
+          vault operator unseal $UNSEAL_KEY
+
+          echo "export UNSEAL_KEY=$UNSEAL_KEY" >> /root/.bashrc
+          echo "export TOKEN=$TOKEN" >> /root/.bashrc
+          echo 'export VAULT_ADDR="http://10.16.61.86:8200"' >> /root/.bashrc          
+          source /root/.bashrc
+
+          ###### helm
+          curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+          chmod 700 get_helm.sh
+          ./get_helm.sh
+
+          ###### Install Secret store CSI driver
+          helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
+          helm upgrade -i csi secrets-store-csi-driver/secrets-store-csi-driver \
+              --kubeconfig ~/.kube/config \
+              --set syncSecret.enabled=true \
+              --set enableSecretRotation=true \
+              --set rotationPollInterval=30s \
+              --set syncSecret.enabled=true
+
+          ###### Install Valut CSI Provider
+          helm repo add hashicorp https://helm.releases.hashicorp.com
+          helm install vault hashicorp/vault \
+              --kubeconfig ~/.kube/config \
+              --set "server.enabled=false" \
+              --set "injector.enabled=false" \
+              --set "csi.enabled=true"
+
+          git clone https://github.com/seannguyn/k8s-vault-csi.git
+
+          ############### Signal ###############
+          cfn-signal -e $? --stack ${AWS::StackId} --resource ControlPlane --region ${AWS::Region}
+  Node01:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT30M
+    DependsOn: VaultServer
+    Properties:
+      InstanceType: "t2.micro"
+      ImageId: !Ref LatestAmiId
+      PrivateIpAddress: "10.16.63.217"
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Ref Subnet
+      SecurityGroupIds:
+        - !Ref DefaultInstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: node01
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+
+          ############### Install cli ###############
+          sudo apt update
+          sudo apt install -y unzip curl
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -q awscliv2.zip
+          sudo ./aws/install
+          aws --version
+          apt  install jq -y
+
+          ############### Install aws cfn-signal ###############
+          sudo apt-get -y update
+          sudo apt-get -y install python3-pip
+          sudo pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+          sudo perl -pi -e "s/collections.MutableMapping/collections.abc.MutableMapping/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/cookies.py
+          sudo perl -pi -e "s/collections.MutableMapping/collections.abc.MutableMapping/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/structures.py
+          sudo perl -pi -e "s/from collections import Mapping/from collections.abc import Mapping/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/sessions.py
+          sudo perl -pi -e "s/collections.Mapping/collections.abc.Mapping/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/utils.py
+          sudo perl -pi -e "s/collections.Callable/collections.abc.Callable/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/models.py
+
+          ############### Install Vault CLI ###############
+          echo "starting..."
+          curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+          sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main" -y
+          sudo apt-get update -y && sudo apt-get install vault -y
+          vault --version
+          
+          ############### KUBERNETES COMMON SETUP ###############
+          ###### https://askubuntu.com/questions/1367139/apt-get-upgrade-auto-restart-services
+          ###### https://gist.github.com/fernandoaleman/c3191ed46c977f0a3fcfbdac319183fc
+          sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
+
+          ###### Containerd prerequisite
+          cat <<__EOF | sudo tee /etc/modules-load.d/k8s.conf
+          overlay
+          br_netfilter
+          __EOF
+
+          sudo modprobe overlay
+          sudo modprobe br_netfilter
+
+          # sysctl params required by setup, params persist across reboots
+          cat <<__EOF | sudo tee /etc/sysctl.d/k8s.conf
+          net.bridge.bridge-nf-call-iptables  = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward                 = 1
+          __EOF
+
+          # Apply sysctl params without reboot
+          sudo sysctl --system
+
+          lsmod | grep br_netfilter
+          lsmod | grep overlay
+          sysctl net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward
+
+          ###### Install Containerd
+          # Add Docker's official GPG key:
+          sudo apt-get update
+          sudo apt-get install ca-certificates curl
+          sudo install -m 0755 -d /etc/apt/keyrings
+          sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+          # Add the repository to Apt sources:
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+          sudo apt-get update
+
+          sudo apt install --allow-unauthenticated -qq -y containerd.io apt-transport-https
+          sudo mkdir -p /etc/containerd
+          sudo containerd config default > /etc/containerd/config.toml
+          sudo sed -i 's/SystemdCgroup \= false/SystemdCgroup \= true/g' /etc/containerd/config.toml
+          sudo systemctl restart containerd
+          sudo systemctl enable containerd >/dev/null 2>&1
+          sudo systemctl status containerd.service
+
+          # set download latest crictl
+          CTLVERSION=$(curl -s https://api.github.com/repos/kubernetes-sigs/cri-tools/releases/latest | grep "tag_name" | cut -d '"' -f 4)
+
+          sudo wget -q https://github.com/kubernetes-sigs/cri-tools/releases/download/$CTLVERSION/crictl-$CTLVERSION-linux-amd64.tar.gz
+          sudo tar zxvf crictl-$CTLVERSION-linux-amd64.tar.gz -C /usr/local/bin
+          rm -f crictl-$CTLVERSION-linux-amd64.tar.gz
+
+          sudo crictl config --set runtime-endpoint=unix:///run/containerd/containerd.sock
+          sudo crictl --version
+
+          ###### Install kubelet, kubeadm, kubectl
+          sudo apt-get update
+          # apt-transport-https may be a dummy package; if so, you can skip that package
+          sudo apt-get install -y apt-transport-https ca-certificates curl gpg
+
+          # If the directory `/etc/apt/keyrings` does not exist, it should be created before the curl command, read the note below.
+          # sudo mkdir -p -m 755 /etc/apt/keyrings
+          curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+          # This overwrites any existing configuration in /etc/apt/sources.list.d/kubernetes.list
+          echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+          sudo apt-get update
+          sudo apt-get install -y kubelet kubeadm kubectl
+          sudo apt-mark hold kubelet kubeadm kubectl
+
+          sudo systemctl enable --now kubelet
+
+          ############### Worker node ###############
+          NODE_NAME=node01
+          sudo hostnamectl set-hostname $NODE_NAME
+          sudo echo $NODE_NAME > /etc/hostname
+
+          # AWS CLI command to fetch the file from S3
+          {
+            set +xe
+            fetch_from_s3() {
+                output=$(aws s3 cp s3://${S3}/join.sh ./join.sh 2>&1)
+                
+                # Check if the output contains the specific error message
+                if echo "$output" | grep -q "404"; then
+                    echo "File join.sh NOT yet uploaded."
+                elif [ $? -eq 0 ]; then
+                    echo "File join.sh fetched successfully."
+                else
+                    echo "An unknown error occurred:"
+                    echo "$output"
+                fi
+            }
+
+            # Number of retries
+            max_retries=7
+            retry_interval=60  # in seconds
+            retry_count=0
+
+            while [ $retry_count -lt $max_retries ]; do
+                echo "Attempting to fetch join.sh from S3 (attempt $((retry_count+1)) of $max_retries)..."
+                
+                fetch_from_s3
+                
+                # Check if file exists
+                if [ -f "./join.sh" ]; then
+                    break
+                else
+                    echo "Retrying in $retry_interval seconds..."
+                    sleep $retry_interval
+                    ((retry_count++))
+                fi
+            done
+
+            if [ ! -f "./join.sh" ]; then
+                echo "Failed to fetch join.sh after $max_retries attempts."
+                exit 1
+            fi
+          }
+
+          set -xe
+
+          aws s3 rm s3://${S3}/join.sh
+          echo "File join.sh removed from S3 successfully."
+          
+          chmod +x ./join.sh
+          ./join.sh
+          echo "Join cluster successfully"
+
+          ############### Signal ###############
+          cfn-signal -e $? --stack ${AWS::StackId} --resource Node01 --region ${AWS::Region}
+  VaultServer:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT10M
+    Properties:
+      InstanceType: "t2.micro"
+      ImageId: !Ref LatestAmiId
+      PrivateIpAddress: "10.16.61.86"
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Ref Subnet
+      SecurityGroupIds:
+        - !Ref DefaultInstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: vault
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+
+          ############### Install cli ###############
+          sudo apt update
+          sudo apt install -y unzip curl
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -q awscliv2.zip
+          sudo ./aws/install
+          aws --version
+          apt  install jq -y
+
+          ############### Install aws cfn-signal ###############
+          sudo apt-get -y update
+          sudo apt-get -y install python3-pip
+          sudo pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+          sudo perl -pi -e "s/collections.MutableMapping/collections.abc.MutableMapping/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/cookies.py
+          sudo perl -pi -e "s/collections.MutableMapping/collections.abc.MutableMapping/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/structures.py
+          sudo perl -pi -e "s/from collections import Mapping/from collections.abc import Mapping/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/sessions.py
+          sudo perl -pi -e "s/collections.Mapping/collections.abc.Mapping/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/utils.py
+          sudo perl -pi -e "s/collections.Callable/collections.abc.Callable/g" /usr/local/lib/python3.10/dist-packages/cfnbootstrap/packages/requests/models.py
+
+          ############### Setup Vault Server ###############
+          ###### https://askubuntu.com/questions/1367139/apt-get-upgrade-auto-restart-services
+          ###### https://gist.github.com/fernandoaleman/c3191ed46c977f0a3fcfbdac319183fc
+          sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
+
+          NODE_NAME=vault
+          sudo hostnamectl set-hostname $NODE_NAME
+          sudo echo $NODE_NAME > /etc/hostname
+
+          echo "starting..."
+          curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+          sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main" -y
+          sudo apt-get update -y && sudo apt-get install vault -y
+          mkdir -p /etc/vault.d/
+
+          echo "configuring vault..."
+          cat <<EOF > /etc/vault.d/vault.hcl
+          ui = true
+
+          #mlock = true
+          #disable_mlock = true
+
+          storage "file" {
+            path = "/opt/vault/data"
+          }
+
+          #HTTP listener
+          listener "tcp" {
+            address = "0.0.0.0:8200"
+            tls_disable = 1
+          }
+
+          EOF
+
+          export VAULT_SKIP_VERIFY=true
+
+          sudo systemctl start vault
+          sudo systemctl enable vault
+          sudo systemctl status vault
+
+          touch /var/log/vault_audit.log
+          chmod 644 /var/log/vault_audit.log
+          chown vault:vault /var/log/vault_audit.log
+          apt install jq -y
+          apt install net-tools
+
+          echo "vault up & running..."
+
+          ############### Signal ###############
+          cfn-signal -e $? --stack ${AWS::StackId} --resource VaultServer --region ${AWS::Region}
