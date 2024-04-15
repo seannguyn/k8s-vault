@@ -10,7 +10,7 @@ k config set-context --current --namespace=app1-dev
 k apply -f /k8s-vault/vault-csi/sa-vault.yaml
 
 #token
-export K8S_TOKEN=$(k get secret app1-dev-sa-secret -o jsonpath="{.data.token}" | base64 -d)
+export K8S_TOKEN=$(k get secret vault-auth-secret -n default -o jsonpath="{.data.token}" | base64 -d)
 echo $K8S_TOKEN
 
 #ca cert
@@ -19,7 +19,7 @@ echo $K8S_CA_CRT
 
 #host
 export K8S_HOST=$(k config view --raw -o 'jsonpath={.clusters[].cluster.server}')
-echo $K8S_HOST 
+echo $K8S_HOST
 
 # ---------------------
 #create vault k8s auth
@@ -61,16 +61,17 @@ k get secretproviderclass -A
 
 #pod which mounts valut secret
 k apply -f /k8s-vault/vault-csi/webapp.yaml
-k get pods --watch
-k exec -it webapp -- cat /mnt/secrets-store/db-password
+k get pods -A --watch
+k exec -it webapp -n app1-dev -- cat /mnt/secrets-store/db-password
+k exec -it webapp -n app1-stg -- cat /mnt/secrets-store/db-password
 
-#Change secrets to see if it is reflected. 
+#Change secrets to see if it is reflected.
 #It should take 30s to reflect, because of "--set rotationPollInterval=30s" in csi driver
 vault kv put app1-dev/secrets/db-pass pwd="admin@789"
 vault kv get app1-dev/secrets/db-pass
 
 #Check again, it should be admin@789
-k exec -it webapp -- cat /mnt/secrets-store/db-password
+k exec -it webapp -n app1-dev -- cat /mnt/secrets-store/db-password
 
 # curl Vault for verification
 curl -H "X-Vault-Token: $TOKEN" \

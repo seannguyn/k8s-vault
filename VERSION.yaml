@@ -1,0 +1,10 @@
+Versons:
+  "1.0":
+    Description: |
+      Test role with service account and namespace = *
+    Conclusion: Cannot use *, too open, other tenants can read it
+
+  "2.0":
+    Description: |
+      use vault-auth for kubernetes auth.
+    Conclusion: Use a dedicated sa for authentication, and other SA for secrets access

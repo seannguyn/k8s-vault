@@ -6,7 +6,6 @@ metadata:
 spec:
   provider: vault
   parameters:
-    # vaultAddress: "http://10.16.61.86:8200"
     roleName: "app1-dev-role"
     objects: |
       - objectName: "db-password"
@@ -21,7 +20,6 @@ metadata:
 spec:
   provider: vault
   parameters:
-    # vaultAddress: "http://10.16.61.86:8200"
     roleName: "app1-dev-role"
     objects: |
       - objectName: "db-password"
