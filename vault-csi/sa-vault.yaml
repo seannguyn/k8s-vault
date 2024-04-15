@@ -25,3 +25,9 @@ subjects:
 - kind: Group
   name: system:serviceaccounts
   apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app1-stg-sa
+  namespace: app1-stg

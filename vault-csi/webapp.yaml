@@ -8,6 +8,10 @@ spec:
   containers:
   - image: jweissig/app:0.0.1
     name: webapp
+    resources:
+      limits:
+        memory: 128Mi
+        cpu: "0.25"
     volumeMounts:
     - name: secrets-store-inline
       mountPath: "/mnt/secrets-store"
@@ -19,3 +23,29 @@ spec:
         readOnly: true
         volumeAttributes:
           secretProviderClass: "app1-dev-vault"
+---
+kind: Pod
+apiVersion: v1
+metadata:
+  name: webapp
+  namespace: app1-stg
+spec:
+  serviceAccountName: app1-stg-sa
+  containers:
+  - image: jweissig/app:0.0.1
+    name: webapp
+    resources:
+      limits:
+        memory: 128Mi
+        cpu: "0.25"
+    volumeMounts:
+    - name: secrets-store-inline
+      mountPath: "/mnt/secrets-store"
+      readOnly: true
+  volumes:
+    - name: secrets-store-inline
+      csi:
+        driver: secrets-store.csi.k8s.io
+        readOnly: true
+        volumeAttributes:
+          secretProviderClass: "app1-stg-vault"

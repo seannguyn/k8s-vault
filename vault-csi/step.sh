@@ -48,8 +48,8 @@ vault policy read app1-dev-policy
 
 # TEST THIS. WHAT HAPPEN IF EXPRE?
 vault write auth/kubernetes/cluster1/role/app1-dev-role \
-    bound_service_account_names=app1-dev-sa \
-    bound_service_account_namespaces=app1-dev \
+    bound_service_account_names=* \
+    bound_service_account_namespaces=* \
     policies=app1-dev-policy \
     ttl=2h
 
@@ -57,7 +57,7 @@ vault read auth/kubernetes/cluster1/role/app1-dev-role
 
 #create vault SecretProviderClass
 k apply -f /k8s-vault/vault-csi/spc-crd-vault.yaml
-k get secretproviderclass
+k get secretproviderclass -A
 
 #pod which mounts valut secret
 k apply -f /k8s-vault/vault-csi/webapp.yaml

@@ -1,0 +1,5 @@
+Versons:
+1.0:
+Description: |
+  Test role with service account and namespace = *
+Conclusion: Cannot use *, too open, other tenants can read it
