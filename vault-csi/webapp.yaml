@@ -2,8 +2,9 @@ kind: Pod
 apiVersion: v1
 metadata:
   name: webapp
+  namespace: app1-dev
 spec:
-  serviceAccountName: vault-auth-sa
+  serviceAccountName: app1-dev-sa
   containers:
   - image: jweissig/app:0.0.1
     name: webapp
@@ -17,4 +18,4 @@ spec:
         driver: secrets-store.csi.k8s.io
         readOnly: true
         volumeAttributes:
-          secretProviderClass: "vault-database"
+          secretProviderClass: "app1-dev-vault"

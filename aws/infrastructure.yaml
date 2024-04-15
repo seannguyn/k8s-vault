@@ -302,10 +302,12 @@ Resources:
           helm install vault hashicorp/vault \
               --kubeconfig ~/.kube/config \
               --set "server.enabled=false" \
+              --set "global.externalVaultAddr=http://10.16.61.86:8200" \
               --set "injector.enabled=false" \
-              --set "csi.enabled=true"
+              --set "csi.enabled=true" \
+              --set "csi.extraArgs={-vault-mount=kubernetes/cluster1}"
 
-          git clone https://github.com/seannguyn/k8s-vault-csi.git
+          git clone https://github.com/seannguyn/k8s-vault.git
 
           ############### Signal ###############
           cfn-signal -e $? --stack ${AWS::StackId} --resource ControlPlane --region ${AWS::Region}
