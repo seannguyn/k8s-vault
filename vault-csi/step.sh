@@ -1,4 +1,3 @@
-# K8s with Vault CSI
 ################################################ PHASE 1: INSTALL CSI DRIVER, VAULT CSI PROVIDER ################################################
 ###### Install Secret store CSI driver
 helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
@@ -24,15 +23,6 @@ helm install vault hashicorp/vault \
 
 
 ################################################ PHASE 2: AUTHENTICATION ################################################################################################
-#create ns
-k apply -f /k8s-vault/vault-csi/ns.yaml
-
-#set context
-k config set-context --current --namespace=app1-dev
-
-#k8s sa,role,secret
-k apply -f /k8s-vault/vault-csi/sa-vault.yaml
-
 #ca cert
 export K8S_CA_CRT=$(k get cm kube-root-ca.crt -o jsonpath='{.data.ca\.crt}')
 echo $K8S_CA_CRT
@@ -41,7 +31,6 @@ echo $K8S_CA_CRT
 export K8S_HOST=$(k config view --raw -o 'jsonpath={.clusters[].cluster.server}')
 echo $K8S_HOST
 
-# ---------------------
 #create vault k8s auth
 vault login $TOKEN
 vault auth enable --path=kubernetes/nw-dev kubernetes
@@ -52,18 +41,11 @@ vault write auth/kubernetes/nw-dev/config \
 
 vault read auth/kubernetes/nw-dev/config
 
-#create valut secret, secret policy
-vault secrets enable -path=/app1-dev/secrets kv
-vault kv put app1-dev/secrets/db-pass pwd="admin@123"
-vault kv get app1-dev/secrets/db-pass
-
-
 
 
 
 
 ################################################ PHASE 3: CREATE POLICY,CREATE ROLE & BOUND ROLE TO NAMESPACE, SA ################################################
-
 vault policy write app1-dev-policy - <<EOF
 path "app1-dev/secrets/db-pass" {
   capabilities = ["read"]
@@ -84,8 +66,16 @@ vault read auth/kubernetes/nw-dev/role/app1-dev-role
 
 
 
-
 ################################################ PHASE 4: SECRETS USAGE ################################################################################################
+#create ns
+k apply -f /k8s-vault/vault-csi/ns.yaml
+
+#set context
+k config set-context --current --namespace=app1-dev
+
+#k8s sa,role,secret
+k apply -f /k8s-vault/vault-csi/sa-vault.yaml
+
 #create vault SecretProviderClass
 k apply -f /k8s-vault/vault-csi/spc-crd-vault.yaml
 k get secretproviderclass -A
@@ -103,7 +93,7 @@ vault kv get app1-dev/secrets/db-pass
 
 #Check again, it should be admin@789
 k exec -it webapp -n app1-dev -- cat /mnt/secrets-store/db-password
-
+k exec -it webapp -n app1-stg -- cat /mnt/secrets-store/db-password
 
 
 
@@ -121,4 +111,3 @@ curl -X POST \
 curl -H "X-Vault-Request: true" \
     -H "X-Vault-Token: $TOKEN" \
     http://10.16.61.86:8200/v1/app1-dev/secrets/db-pass
-

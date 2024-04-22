@@ -22,3 +22,8 @@ Versons:
       Reference: https://developer.hashicorp.com/vault/docs/auth/kubernetes#use-the-vault-client-s-jwt-as-the-reviewer-jwt
       Change cluster1 to nw-dev
     Conclusion: Done
+  
+  "5.0":
+    Description: |
+      Move create create secrets to cfn
+    Conclusion: Done

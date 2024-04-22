@@ -278,9 +278,14 @@ Resources:
 
           vault operator unseal $UNSEAL_KEY
 
+          vault login $TOKEN
+          vault secrets enable -path=/app1-dev/secrets kv
+          vault kv put app1-dev/secrets/db-pass pwd="admin@123"
+          vault kv get app1-dev/secrets/db-pass
+
           echo "export UNSEAL_KEY=$UNSEAL_KEY" >> /root/.bashrc
           echo "export TOKEN=$TOKEN" >> /root/.bashrc
-          echo 'export VAULT_ADDR="http://10.16.61.86:8200"' >> /root/.bashrc          
+          echo "export VAULT_ADDR=$VAULT_ADDR" >> /root/.bashrc          
           source /root/.bashrc
 
           ###### helm
