@@ -8,3 +8,8 @@ Versons:
     Description: |
       use vault-auth for kubernetes auth.
     Conclusion: Use a dedicated sa for authentication, and other SA for secrets access
+  
+  "3.0":
+    Description: |
+      Divide into 4 phases
+    Conclusion: Done

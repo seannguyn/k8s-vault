@@ -1,5 +1,29 @@
 # K8s with Vault CSI
+################################################ PHASE 1: INSTALL CSI DRIVER, VAULT CSI PROVIDER ################################################
+###### Install Secret store CSI driver
+helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
+          helm upgrade -i csi secrets-store-csi-driver/secrets-store-csi-driver \
+              --kubeconfig ~/.kube/config \
+              --set syncSecret.enabled=true \
+              --set enableSecretRotation=true \
+              --set rotationPollInterval=30s \
+              --set syncSecret.enabled=true
 
+###### Install Valut CSI Provider
+helm repo add hashicorp https://helm.releases.hashicorp.com
+helm install vault hashicorp/vault \
+    --kubeconfig ~/.kube/config \
+    --set "server.enabled=false" \
+    --set "global.externalVaultAddr=http://10.16.61.86:8200" \
+    --set "injector.enabled=false" \
+    --set "csi.enabled=true" \
+    --set "csi.extraArgs={-vault-mount=kubernetes/cluster1}"
+
+
+
+
+
+################################################ PHASE 2: AUTHENTICATION ################################################################################################
 #create ns
 k apply -f /k8s-vault/vault-csi/ns.yaml
 
@@ -39,6 +63,13 @@ vault secrets enable -path=/app1-dev/secrets kv
 vault kv put app1-dev/secrets/db-pass pwd="admin@123"
 vault kv get app1-dev/secrets/db-pass
 
+
+
+
+
+
+################################################ PHASE 3: CREATE POLICY,CREATE ROLE & BOUND ROLE TO NAMESPACE, SA ################################################
+
 vault policy write app1-dev-policy - <<EOF
 path "app1-dev/secrets/db-pass" {
   capabilities = ["read"]
@@ -55,6 +86,12 @@ vault write auth/kubernetes/cluster1/role/app1-dev-role \
 
 vault read auth/kubernetes/cluster1/role/app1-dev-role
 
+
+
+
+
+
+################################################ PHASE 4: SECRETS USAGE ################################################################################################
 #create vault SecretProviderClass
 k apply -f /k8s-vault/vault-csi/spc-crd-vault.yaml
 k get secretproviderclass -A
@@ -73,6 +110,12 @@ vault kv get app1-dev/secrets/db-pass
 #Check again, it should be admin@789
 k exec -it webapp -n app1-dev -- cat /mnt/secrets-store/db-password
 
+
+
+
+
+
+################################################ FOOTNOTE ################################################
 # curl Vault for verification
 curl -H "X-Vault-Token: $TOKEN" \
     -X LIST http://10.16.61.86:8200/v1/auth/kubernetes/cluster1/role | jq
