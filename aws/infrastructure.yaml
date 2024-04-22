@@ -305,7 +305,7 @@ Resources:
               --set "global.externalVaultAddr=http://10.16.61.86:8200" \
               --set "injector.enabled=false" \
               --set "csi.enabled=true" \
-              --set "csi.extraArgs={-vault-mount=kubernetes/cluster1}"
+              --set "csi.extraArgs={-vault-mount=kubernetes/nw-dev}"
 
           git clone https://github.com/seannguyn/k8s-vault.git
 

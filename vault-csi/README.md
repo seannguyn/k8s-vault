@@ -30,40 +30,40 @@ https://developer.hashicorp.com/vault/tutorials/kubernetes/agent-kubernetes
 User
 I have enabled:
 
-vault auth enable --path=cluster1 kubernetes
+vault auth enable --path=nw-dev kubernetes
 vault auth enable kubernetes
 
-pods in my cluster1 is trying to authenticate via: http://10.16.61.86:8200/v1/auth/kubernetes/login
+pods in my nw-dev is trying to authenticate via: http://10.16.61.86:8200/v1/auth/kubernetes/login
 
-Shouldn't it try to do it via http://10.16.61.86:8200/v1/auth/cluster1/login
+Shouldn't it try to do it via http://10.16.61.86:8200/v1/auth/nw-dev/login
 
 ============================================================
-Yes, you're correct. If you've enabled the Kubernetes authentication method at a custom path `cluster1`, the pods in your Kubernetes cluster should be trying to authenticate using the path `http://10.16.61.86:8200/v1/auth/cluster1/login` instead of the default path `http://10.16.61.86:8200/v1/auth/kubernetes/login`.
+Yes, you're correct. If you've enabled the Kubernetes authentication method at a custom path `nw-dev`, the pods in your Kubernetes cluster should be trying to authenticate using the path `http://10.16.61.86:8200/v1/auth/nw-dev/login` instead of the default path `http://10.16.61.86:8200/v1/auth/kubernetes/login`.
 
 Here's what you can do to resolve this:
 
-1. **Update Kubernetes Service Account Configurations**: You'll need to update the service account configurations in your Kubernetes pods to use the correct Vault path (`cluster1` in your case) for authentication.
+1. **Update Kubernetes Service Account Configurations**: You'll need to update the service account configurations in your Kubernetes pods to use the correct Vault path (`nw-dev` in your case) for authentication.
 
     Instead of using the default `vault` annotation:
     ```yaml
     annotations:
       vault.hashicorp.com/agent-inject: "true"
     ```
-    Use the custom path `cluster1`:
+    Use the custom path `nw-dev`:
     ```yaml
     annotations:
       vault.hashicorp.com/agent-inject: "true"
-      vault.hashicorp.com/auth-path: "cluster1"
+      vault.hashicorp.com/auth-path: "nw-dev"
     ```
 
-2. **Restart Pods**: After updating the service account configurations, you'll need to restart the pods for the changes to take effect. Kubernetes will then use the custom `cluster1` path to authenticate with Vault.
+2. **Restart Pods**: After updating the service account configurations, you'll need to restart the pods for the changes to take effect. Kubernetes will then use the custom `nw-dev` path to authenticate with Vault.
 
 3. **Verify Authentication**: Once the pods are restarted, you can verify if they're successfully authenticating with Vault by checking the Vault server logs and the Kubernetes pod logs. Look for any authentication errors or successful authentication messages in both sets of logs.
 
 4. **Testing**: You can also manually test the authentication by running the following command inside one of the pods:
     ```bash
-    vault write auth/cluster1/login role=<ROLE_NAME> jwt=<SERVICE_ACCOUNT_JWT>
+    vault write auth/nw-dev/login role=<ROLE_NAME> jwt=<SERVICE_ACCOUNT_JWT>
     ```
     Replace `<ROLE_NAME>` with the name of the Vault role bound to the Kubernetes service account and `<SERVICE_ACCOUNT_JWT>` with the JWT token of the Kubernetes service account.
 
-By updating the service account configurations and restarting the pods, Kubernetes should now use the custom `cluster1` path to authenticate with Vault, resolving the `404` error you encountered earlier.
+By updating the service account configurations and restarting the pods, Kubernetes should now use the custom `nw-dev` path to authenticate with Vault, resolving the `404` error you encountered earlier.

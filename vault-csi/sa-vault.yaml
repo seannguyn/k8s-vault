@@ -14,21 +14,6 @@ subjects:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: vault-auth
-  namespace: default
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: vault-auth-secret
-  namespace: default
-  annotations:
-    kubernetes.io/service-account.name: vault-auth
-type: kubernetes.io/service-account-token
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
   name: app1-dev-sa
   namespace: app1-dev
 ---

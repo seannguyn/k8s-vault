@@ -2,12 +2,12 @@
 ################################################ PHASE 1: INSTALL CSI DRIVER, VAULT CSI PROVIDER ################################################
 ###### Install Secret store CSI driver
 helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
-          helm upgrade -i csi secrets-store-csi-driver/secrets-store-csi-driver \
-              --kubeconfig ~/.kube/config \
-              --set syncSecret.enabled=true \
-              --set enableSecretRotation=true \
-              --set rotationPollInterval=30s \
-              --set syncSecret.enabled=true
+helm upgrade -i csi secrets-store-csi-driver/secrets-store-csi-driver \
+    --kubeconfig ~/.kube/config \
+    --set syncSecret.enabled=true \
+    --set enableSecretRotation=true \
+    --set rotationPollInterval=30s \
+    --set syncSecret.enabled=true
 
 ###### Install Valut CSI Provider
 helm repo add hashicorp https://helm.releases.hashicorp.com
@@ -17,7 +17,7 @@ helm install vault hashicorp/vault \
     --set "global.externalVaultAddr=http://10.16.61.86:8200" \
     --set "injector.enabled=false" \
     --set "csi.enabled=true" \
-    --set "csi.extraArgs={-vault-mount=kubernetes/cluster1}"
+    --set "csi.extraArgs={-vault-mount=kubernetes/nw-dev}"
 
 
 
@@ -33,10 +33,6 @@ k config set-context --current --namespace=app1-dev
 #k8s sa,role,secret
 k apply -f /k8s-vault/vault-csi/sa-vault.yaml
 
-#token
-export K8S_TOKEN=$(k get secret vault-auth-secret -n default -o jsonpath="{.data.token}" | base64 -d)
-echo $K8S_TOKEN
-
 #ca cert
 export K8S_CA_CRT=$(k get cm kube-root-ca.crt -o jsonpath='{.data.ca\.crt}')
 echo $K8S_CA_CRT
@@ -48,15 +44,13 @@ echo $K8S_HOST
 # ---------------------
 #create vault k8s auth
 vault login $TOKEN
-vault auth enable --path=kubernetes/cluster1 kubernetes
+vault auth enable --path=kubernetes/nw-dev kubernetes
 
-vault write auth/kubernetes/cluster1/config \
-    token_reviewer_jwt="$K8S_TOKEN" \
+vault write auth/kubernetes/nw-dev/config \
     kubernetes_host="$K8S_HOST" \
-    kubernetes_ca_cert="$K8S_CA_CRT" \
-    disable_local_ca_jwt=true
+    kubernetes_ca_cert="$K8S_CA_CRT"
 
-vault read auth/kubernetes/cluster1/config
+vault read auth/kubernetes/nw-dev/config
 
 #create valut secret, secret policy
 vault secrets enable -path=/app1-dev/secrets kv
@@ -78,13 +72,13 @@ EOF
 vault policy read app1-dev-policy
 
 # TEST THIS. WHAT HAPPEN IF EXPRE?
-vault write auth/kubernetes/cluster1/role/app1-dev-role \
+vault write auth/kubernetes/nw-dev/role/app1-dev-role \
     bound_service_account_names=* \
     bound_service_account_namespaces=* \
     policies=app1-dev-policy \
     ttl=2h
 
-vault read auth/kubernetes/cluster1/role/app1-dev-role
+vault read auth/kubernetes/nw-dev/role/app1-dev-role
 
 
 
@@ -115,14 +109,14 @@ k exec -it webapp -n app1-dev -- cat /mnt/secrets-store/db-password
 
 
 
-################################################ FOOTNOTE ################################################
+################################################ MISCELLANEOUS ################################################
 # curl Vault for verification
 curl -H "X-Vault-Token: $TOKEN" \
-    -X LIST http://10.16.61.86:8200/v1/auth/kubernetes/cluster1/role | jq
+    -X LIST http://10.16.61.86:8200/v1/auth/kubernetes/nw-dev/role | jq
 
 curl -X POST \
      --data "{\"role\": \"app1-dev-role\",\"jwt\": \"$K8S_TOKEN\" }" \
-     http://10.16.61.86:8200/v1/auth/kubernetes/cluster1/login
+     http://10.16.61.86:8200/v1/auth/kubernetes/nw-dev/login
 
 curl -H "X-Vault-Request: true" \
     -H "X-Vault-Token: $TOKEN" \

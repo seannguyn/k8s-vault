@@ -13,3 +13,12 @@ Versons:
     Description: |
       Divide into 4 phases
     Conclusion: Done
+
+  "4.0":
+    Description: |
+      Remove service account and token.
+      Remove token_reviewer_jwt in k8s auth for Vault.
+      Use the Vault client's JWT as the reviewer JWT
+      Reference: https://developer.hashicorp.com/vault/docs/auth/kubernetes#use-the-vault-client-s-jwt-as-the-reviewer-jwt
+      Change cluster1 to nw-dev
+    Conclusion: Done
