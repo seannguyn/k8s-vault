@@ -160,9 +160,11 @@ Resources:
           ############### KUBERNETES COMMON SETUP ###############
           ###### https://askubuntu.com/questions/1367139/apt-get-upgrade-auto-restart-services
           ###### https://gist.github.com/fernandoaleman/c3191ed46c977f0a3fcfbdac319183fc
+          ###### Restart the services automatically "a" instead of interactive "i"
           sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
 
-          ###### Containerd prerequisite
+          ###### Containerd prerequisite: 
+          ###### https://v1-28.docs.kubernetes.io/docs/setup/production-environment/container-runtimes/
           cat <<__EOF | sudo tee /etc/modules-load.d/k8s.conf
           overlay
           br_netfilter
@@ -186,6 +188,7 @@ Resources:
           sysctl net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward
 
           ###### Install Containerd
+          ###### https://docs.docker.com/engine/install/ubuntu/
           # Add Docker's official GPG key:
           sudo apt-get update
           sudo apt-get install ca-certificates curl
@@ -209,7 +212,8 @@ Resources:
           sudo systemctl enable containerd >/dev/null 2>&1
           sudo systemctl status containerd.service
 
-          # set download latest crictl
+          ###### set download latest crictl
+          ###### https://github.com/ramanagali/k8s-cluster/blob/master/scripts/common.sh#L133-L141
           CTLVERSION=$(curl -s https://api.github.com/repos/kubernetes-sigs/cri-tools/releases/latest | grep "tag_name" | cut -d '"' -f 4)
 
           sudo wget -q https://github.com/kubernetes-sigs/cri-tools/releases/download/$CTLVERSION/crictl-$CTLVERSION-linux-amd64.tar.gz
@@ -220,6 +224,7 @@ Resources:
           sudo crictl --version
 
           ###### Install kubelet, kubeadm, kubectl
+          ###### https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/#installing-kubeadm-kubelet-and-kubectl
           sudo apt-get update
           # apt-transport-https may be a dummy package; if so, you can skip that package
           sudo apt-get install -y apt-transport-https ca-certificates curl gpg
@@ -238,6 +243,7 @@ Resources:
           sudo systemctl enable --now kubelet
 
           ############### Controlplane setup ###############
+          ###### https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/
           NODE_NAME=controlplane
           sudo hostnamectl set-hostname $NODE_NAME
           sudo echo $NODE_NAME > /etc/hostname
@@ -267,12 +273,12 @@ Resources:
           # utilities
           echo 'alias k="kubectl"' >> /root/.bashrc
 
-          # setup Vault
+          ############### SETUP Vault ###############
           export VAULT_ADDR="http://10.16.61.86:8200"
           vault operator init \
             -key-shares=1 \
             -key-threshold=1 > /root/vault_config.txt
-          
+
           UNSEAL_KEY=$(grep "Unseal Key 1:" /root/vault_config.txt | awk '{print $NF}')
           TOKEN=$(grep "Initial Root Token:" /root/vault_config.txt | awk '{print $NF}')
 
@@ -280,20 +286,22 @@ Resources:
 
           vault login $TOKEN
           vault secrets enable -path=/app1-dev/secrets kv
-          vault kv put app1-dev/secrets/db-pass pwd="admin@123"
-          vault kv get app1-dev/secrets/db-pass
+          vault kv put app1-dev/secrets/db-pass pwd="app1-dev"
+
+          vault secrets enable -path=/app1-stg/secrets kv
+          vault kv put app1-stg/secrets/db-pass pwd="app1-stg"
 
           echo "export UNSEAL_KEY=$UNSEAL_KEY" >> /root/.bashrc
           echo "export TOKEN=$TOKEN" >> /root/.bashrc
-          echo "export VAULT_ADDR=$VAULT_ADDR" >> /root/.bashrc          
+          echo "export VAULT_ADDR=$VAULT_ADDR" >> /root/.bashrc
           source /root/.bashrc
 
-          ###### helm
+          ############### INSTALL HELM ###############
           curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
           chmod 700 get_helm.sh
           ./get_helm.sh
 
-          ###### Install Secret store CSI driver
+          ############### Install Secret store CSI driver ###############
           helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
           helm upgrade -i csi secrets-store-csi-driver/secrets-store-csi-driver \
               --kubeconfig ~/.kube/config \
@@ -302,7 +310,7 @@ Resources:
               --set rotationPollInterval=30s \
               --set syncSecret.enabled=true
 
-          ###### Install Valut CSI Provider
+          ############### Install Valut CSI Provider ###############
           helm repo add hashicorp https://helm.releases.hashicorp.com
           helm install vault hashicorp/vault \
               --kubeconfig ~/.kube/config \
@@ -362,7 +370,7 @@ Resources:
           sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main" -y
           sudo apt-get update -y && sudo apt-get install vault -y
           vault --version
-          
+
           ############### KUBERNETES COMMON SETUP ###############
           ###### https://askubuntu.com/questions/1367139/apt-get-upgrade-auto-restart-services
           ###### https://gist.github.com/fernandoaleman/c3191ed46c977f0a3fcfbdac319183fc
@@ -453,7 +461,7 @@ Resources:
             set +xe
             fetch_from_s3() {
                 output=$(aws s3 cp s3://${S3}/join.sh ./join.sh 2>&1)
-                
+
                 # Check if the output contains the specific error message
                 if echo "$output" | grep -q "404"; then
                     echo "File join.sh NOT yet uploaded."
@@ -472,9 +480,9 @@ Resources:
 
             while [ $retry_count -lt $max_retries ]; do
                 echo "Attempting to fetch join.sh from S3 (attempt $((retry_count+1)) of $max_retries)..."
-                
+
                 fetch_from_s3
-                
+
                 # Check if file exists
                 if [ -f "./join.sh" ]; then
                     break
@@ -495,7 +503,7 @@ Resources:
 
           aws s3 rm s3://${S3}/join.sh
           echo "File join.sh removed from S3 successfully."
-          
+
           chmod +x ./join.sh
           ./join.sh
           echo "Join cluster successfully"

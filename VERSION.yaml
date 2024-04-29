@@ -8,7 +8,7 @@ Versons:
     Description: |
       use vault-auth for kubernetes auth.
     Conclusion: Use a dedicated sa for authentication, and other SA for secrets access
-  
+
   "3.0":
     Description: |
       Divide into 4 phases
@@ -22,8 +22,13 @@ Versons:
       Reference: https://developer.hashicorp.com/vault/docs/auth/kubernetes#use-the-vault-client-s-jwt-as-the-reviewer-jwt
       Change cluster1 to nw-dev
     Conclusion: Done
-  
+
   "5.0":
     Description: |
       Move create create secrets to cfn
     Conclusion: Done
+
+  "6.0":
+    Description: |
+      Use Vault Entity, Entity Alias, and Group
+    Conclusion: Succeess

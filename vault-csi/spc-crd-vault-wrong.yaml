@@ -9,7 +9,7 @@ spec:
     roleName: "default"
     objects: |
       - objectName: "db-password"
-        secretPath: "app1-dev/secrets/db-pass"
+        secretPath: "app1-stg/secrets/db-pass"
         secretKey: "pwd"
 ---
 apiVersion: secrets-store.csi.x-k8s.io/v1
@@ -23,5 +23,5 @@ spec:
     roleName: "default"
     objects: |
       - objectName: "db-password"
-        secretPath: "app1-stg/secrets/db-pass"
+        secretPath: "app1-dev/secrets/db-pass"
         secretKey: "pwd"
