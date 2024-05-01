@@ -37,3 +37,8 @@ Versons:
     Description: |
       Install Secret Store CSI Driver and Vault CSI Driver via yamls
     Conclusion: Succeess
+
+  "8.0":
+    Description: |
+      Comparison between Vault Agent Injector and Vault CSI Provider
+    Conclusion: Done
