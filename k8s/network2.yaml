@@ -1,0 +1,14 @@
+apiVersion: crd.projectcalico.org/v1
+kind: NetworkPolicy
+metadata:
+  name: secrets-store-csi-driver
+  namespace: vault-csi-provider
+spec:
+  selector: app == 'csi-secrets-store'
+  types:
+    - Egress
+  egress:
+    - action: Allow
+      destination:
+        nets:
+          - 10.16.54.222/32

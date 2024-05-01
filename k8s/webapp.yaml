@@ -6,7 +6,7 @@ metadata:
 spec:
   serviceAccountName: app1-dev-sa
   containers:
-  - image: jweissig/app:0.0.1
+  - image: nginx:1.25.5-alpine
     name: webapp
     resources:
       limits:
@@ -32,7 +32,7 @@ metadata:
 spec:
   serviceAccountName: app1-stg-sa
   containers:
-  - image: jweissig/app:0.0.1
+  - image: nginx:1.25.5-alpine
     name: webapp
     resources:
       limits:

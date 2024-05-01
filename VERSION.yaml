@@ -32,3 +32,8 @@ Versons:
     Description: |
       Use Vault Entity, Entity Alias, and Group
     Conclusion: Succeess
+  
+  "7.0":
+    Description: |
+      Install Secret Store CSI Driver and Vault CSI Driver via yamls
+    Conclusion: Succeess

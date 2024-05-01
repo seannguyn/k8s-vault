@@ -1,23 +1,33 @@
-################################################ PHASE 1: INSTALL CSI DRIVER, VAULT CSI PROVIDER ################################################
+################################################ PHASE 1: INSTALL SECRET STORE CSI DRIVER, VAULT CSI PROVIDER ################################################
+###### Create default deny global network policy
+k apply -f /k8s-vault/k8s/global.yaml
+
+###### Create namespace + configmap
+k apply -f /k8s-vault/vault-csi-provider/namespace.yaml \
+        -f /k8s-vault/vault-csi-provider/configmap.yaml
+
 ###### Install Secret store CSI driver
-helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
-helm upgrade -i csi secrets-store-csi-driver/secrets-store-csi-driver \
-    --kubeconfig ~/.kube/config \
-    --set syncSecret.enabled=true \
-    --set enableSecretRotation=true \
-    --set rotationPollInterval=30s \
-    --set syncSecret.enabled=true
+###### https://secrets-store-csi-driver.sigs.k8s.io/getting-started/installation#alternatively-deployment-using-yamls
+k apply -f /k8s-vault/vault-csi-provider/rbac-secretproviderclass.yaml \
+        -f /k8s-vault/vault-csi-provider/csidriver.yaml \
+        -f /k8s-vault/vault-csi-provider/secrets-store.csi.x-k8s.io_secretproviderclasses.yaml \
+        -f /k8s-vault/vault-csi-provider/secrets-store.csi.x-k8s.io_secretproviderclasspodstatuses.yaml \
+        -f /k8s-vault/vault-csi-provider/secrets-store-csi-driver.yaml \
+        -f /k8s-vault/vault-csi-provider/rbac-secretprovidersyncing.yaml \
+        -f /k8s-vault/vault-csi-provider/rbac-secretproviderrotation.yaml
 
-###### Install Valut CSI Provider
-helm repo add hashicorp https://helm.releases.hashicorp.com
-helm install vault hashicorp/vault \
-    --kubeconfig ~/.kube/config \
-    --set "server.enabled=false" \
-    --set "global.externalVaultAddr=http://10.16.61.86:8200" \
-    --set "injector.enabled=false" \
-    --set "csi.enabled=true" \
-    --set "csi.extraArgs={-vault-mount=kubernetes/nw-dev}"
+###### Install Vault CSI Provider
+###### https://github.com/hashicorp/vault-csi-provider/tree/main?tab=readme-ov-file#using-yaml
+k apply -f /k8s-vault/vault-csi-provider/vault-csi-provider.yaml
 
+### Verification
+k --namespace=vault-csi-provider get pods --watch
+k --namespace=vault-csi-provider get pods -l "app=csi-secrets-store"
+k --namespace=vault-csi-provider get pods -l "app.kubernetes.io/name=vault-csi-provider"
+k --namespace=vault-csi-provider get csidrivers
+k --namespace=vault-csi-provider get csinodes
+k api-resources | grep -i csi
+k get crd | grep "secretproviderclass"
 
 
 
@@ -32,7 +42,7 @@ export K8S_HOST=$(k config view --raw -o 'jsonpath={.clusters[].cluster.server}'
 echo $K8S_HOST
 
 ### Create vault k8s auth
-vault login $TOKEN
+vault login -no-print $TOKEN 
 vault auth enable --path=kubernetes/nw-dev kubernetes
 
 vault write auth/kubernetes/nw-dev/config \
@@ -55,8 +65,8 @@ vault read auth/kubernetes/nw-dev/role/default
 
 ### Create policy for app1-dev
 vault policy write app1-dev-policy - <<EOF
-path "app1-dev/secrets/db-pass" {
-  capabilities = ["read"]
+path "kv/assets/app1/app1-dev/*" {
+  capabilities = ["read,list"]
 }
 EOF
 vault policy read app1-dev-policy
@@ -84,8 +94,8 @@ vault write identity/group \
 
 ### Create policy for app1-stg
 vault policy write app1-stg-policy - <<EOF
-path "app1-stg/secrets/db-pass" {
-  capabilities = ["read"]
+path "kv/assets/app1/app1-stg/*" {
+  capabilities = ["read,list"]
 }
 EOF
 vault policy read app1-stg-policy
@@ -114,32 +124,43 @@ vault write identity/group \
 
 ################################################ PHASE 3: SECRETS USAGE ################################################################################################
 # create ns: app1-dev, app1-stg
-k apply -f /k8s-vault/vault-csi/ns.yaml
+k apply -f /k8s-vault/k8s/ns.yaml
 
 # set context
 k config set-context --current --namespace=app1-dev
 
 # k8s sa, clusterrolebinding
-k apply -f /k8s-vault/vault-csi/sa-vault.yaml
+k apply -f /k8s-vault/k8s/sa-vault.yaml
 
 # create vault SecretProviderClass
-k apply -f /k8s-vault/vault-csi/spc-crd-vault.yaml
+k apply -f /k8s-vault/k8s/spc-crd-vault-wrong-path.yaml
 k get secretproviderclass -A
 
 # create pod that consume secrets from Vault
-k apply -f /k8s-vault/vault-csi/webapp.yaml
+k apply -f /k8s-vault/k8s/webapp.yaml
 k get pods -A --watch
-k exec -it webapp -n app1-dev -- cat /mnt/secrets-store/db-password
-k exec -it webapp -n app1-stg -- cat /mnt/secrets-store/db-password
+echo $(k exec -it webapp -n app1-dev -- cat /mnt/secrets-store/secret1_key1)
+echo $(k exec -it webapp -n app1-dev -- cat /mnt/secrets-store/secret1_key2)
+echo $(k exec -it webapp -n app1-dev -- cat /mnt/secrets-store/secret2_key1)
+echo $(k exec -it webapp -n app1-dev -- cat /mnt/secrets-store/secret2_key2)
+
+echo $(k exec -it webapp -n app1-stg -- cat /mnt/secrets-store/secret1_key1)
+echo $(k exec -it webapp -n app1-stg -- cat /mnt/secrets-store/secret1_key2)
+echo $(k exec -it webapp -n app1-stg -- cat /mnt/secrets-store/secret2_key1)
+echo $(k exec -it webapp -n app1-stg -- cat /mnt/secrets-store/secret2_key2)
 
 # Change secrets to see if it is reflected.
 # It should take 30s to reflect, because of "--set rotationPollInterval=30s" in csi driver
-vault kv put app1-dev/secrets/db-pass pwd="app1-dev-NEW"
-vault kv put app1-stg/secrets/db-pass pwd="app1-stg-NEW"
+export VAULT_NAMESPACE=kubernetes
+vault kv put kv/assets/app1/app1-dev/secrets1 key1="app1-dev-123-NEW" key2="app1-dev-456-NEW"
+vault kv put kv/assets/app1/app1-stg/secrets1 key1="app1-stg-123-NEW" key2="app1-stg-456-NEW"
 
 # Check again, it should be app1-dev-NEW and app1-stg-NEW
-k exec -it webapp -n app1-dev -- cat /mnt/secrets-store/db-password
-k exec -it webapp -n app1-stg -- cat /mnt/secrets-store/db-password
+echo $(k exec -it webapp -n app1-dev -- cat /mnt/secrets-store/secret1_key1)
+echo $(k exec -it webapp -n app1-dev -- cat /mnt/secrets-store/secret1_key2)
+
+echo $(k exec -it webapp -n app1-stg -- cat /mnt/secrets-store/secret1_key1)
+echo $(k exec -it webapp -n app1-stg -- cat /mnt/secrets-store/secret1_key2)
 
 
 

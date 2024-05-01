@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: secrets-store-csi-driver
+  namespace: vault-csi-provider
+data:
+  enable_secret_rotation: "true"
+  rotation_poll_interval: "30s"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-csi-provider
+  namespace: vault-csi-provider
+data:
+  cluster_name: nw-dev
+  vault_addr: http://10.16.61.86:8200

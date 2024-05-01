@@ -138,7 +138,7 @@ Resources:
           unzip -q awscliv2.zip
           sudo ./aws/install
           aws --version
-          apt  install jq -y
+          apt install jq procps -y
 
           ############### Install aws cfn-signal ###############
           sudo apt-get -y update
@@ -251,6 +251,8 @@ Resources:
           kubeadm init --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=$PRIVATE_IP --node-name=$NODE_NAME
 
           # Install Latest Calico Network Plugin
+          # https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises#install-calico
+          # Choose the manifest option
           sudo curl -LO  https://docs.projectcalico.org/manifests/calico.yaml
           sudo kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f calico.yaml
           echo "Installed Latest Calico Network Plugin"
@@ -284,12 +286,14 @@ Resources:
 
           vault operator unseal $UNSEAL_KEY
 
-          vault login $TOKEN
-          vault secrets enable -path=/app1-dev/secrets kv
-          vault kv put app1-dev/secrets/db-pass pwd="app1-dev"
+          vault login -no-print $TOKEN
+          export VAULT_NAMESPACE=kubernetes
+          vault secrets enable -path=kv kv
+          vault kv put kv/assets/app1/app1-dev/secrets1 key1="app1-dev-123" key2="app1-dev-456"
+          vault kv put kv/assets/app1/app1-dev/secrets2 key1="app1-dev-789" key2="app1-dev-012"
 
-          vault secrets enable -path=/app1-stg/secrets kv
-          vault kv put app1-stg/secrets/db-pass pwd="app1-stg"
+          vault kv put kv/assets/app1/app1-stg/secrets1 key1="app1-stg-123" key2="app1-stg-456"
+          vault kv put kv/assets/app1/app1-stg/secrets2 key1="app1-stg-789" key2="app1-stg-012"
 
           echo "export UNSEAL_KEY=$UNSEAL_KEY" >> /root/.bashrc
           echo "export TOKEN=$TOKEN" >> /root/.bashrc
@@ -300,25 +304,6 @@ Resources:
           curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
           chmod 700 get_helm.sh
           ./get_helm.sh
-
-          ############### Install Secret store CSI driver ###############
-          helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
-          helm upgrade -i csi secrets-store-csi-driver/secrets-store-csi-driver \
-              --kubeconfig ~/.kube/config \
-              --set syncSecret.enabled=true \
-              --set enableSecretRotation=true \
-              --set rotationPollInterval=30s \
-              --set syncSecret.enabled=true
-
-          ############### Install Valut CSI Provider ###############
-          helm repo add hashicorp https://helm.releases.hashicorp.com
-          helm install vault hashicorp/vault \
-              --kubeconfig ~/.kube/config \
-              --set "server.enabled=false" \
-              --set "global.externalVaultAddr=http://10.16.61.86:8200" \
-              --set "injector.enabled=false" \
-              --set "csi.enabled=true" \
-              --set "csi.extraArgs={-vault-mount=kubernetes/nw-dev}"
 
           git clone https://github.com/seannguyn/k8s-vault.git
 
